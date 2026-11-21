@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <xboxkrnl/xboxkrnl.h>
 #include <SDL.h>
+#include <nxdk/mount.h> // TODO: Read Cerbios controller configuration by mounting C:/Cerbios/Cerbios.ini, then E:/Cerbios/Cerbios.ini
 
 void IGR_SDL2_Init(IGR_StateSDL2 *state)
 {
