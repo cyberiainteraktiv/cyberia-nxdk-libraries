@@ -1,5 +1,5 @@
-# CYBERIA:INTERACTIVE NXDK Libraries
-NXDK templates and libraries to assist in making ports feel closer to actual native Xbox games. Please use them to make your lives a bit easier!
+# CYBERIA:INTERAKTIV NXDK Libraries
+NXDK templates and libraries created by CYBERIA:INTERAKTIV to assist in making homebrew ports feel closer to actual native Xbox games. Please use them to make your lives a bit easier!
 
 # [Save Data](https://github.com/cyberiainteractive/nxdk-examples/tree/main/savedata)
 A native Xbox save data library and example main.c file that can be wired into any existing project's saving mechanics.
