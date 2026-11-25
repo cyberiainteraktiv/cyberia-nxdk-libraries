@@ -3,10 +3,10 @@ A template for adding simple in-game reset to your SDL2 or SDL3 commands, using 
 
 ## Usage
 
-- Put "IGR_SDL3.h", "IGR_SDL3.c" and "lib/stb_image_write.h" in your project folder and add "IGR_SDL3.c" to your "Makefile".
-- Add "-DSTBI_WRITE_NO_STDIO" to your C flags in the "Makefile". "IGR_SDL3.c" only includes "stb_image_write.h" as a header, so it won't clash if another file already defines the implementation.
+- Put "IGR_SDLx.h", "IGR_SDLx.c" and "lib/stb_image_write.h" in your project folder and add "IGR_SDLx.c" to your "Makefile". (x being your SDL version number)
+- Add "-DSTBI_WRITE_NO_STDIO" to your C flags in the "Makefile". "IGR_SDLx.c" only includes "stb_image_write.h" as a header, so it won't clash if another file already defines the implementation.
 
-Once video and SDL are up and running, initialize your state and pick an image format:
+Once video and SDL are up and running, initialize your state and pick an image format, ie;
 ```
 #include "IGR_SDL3.h"
 
@@ -18,7 +18,7 @@ IGR_SDL3_SetScreenshotFormat(&igr, IGR_FORMAT_PNG); // or IGR_FORMAT_JPG / IGR_F
 igr.jpg_quality = 90; // optional: 1-100 for JPG
 ```
 
-Put "IGR_SDL3_UpdateWithScreenshot" right after your frame finishes drawing, ie;
+Put "IGR_SDLx_UpdateWithScreenshot" right after your frame finishes drawing, ie;
 ```
 	while (!wants_to_exit) {
 		pump_events();
