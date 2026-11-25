@@ -1,5 +1,4 @@
 // CYBERIA:INTERAKTIV - NXDK IGR library by Rachel Bartmoss (2026)
-// TODO: Add SDL screenshot feature
 
 #include "IGR_SDL3.h"
 
@@ -8,15 +7,44 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <hal/debug.h>
 #include <windows.h>
 #include <xboxkrnl/xboxkrnl.h>
 #include <SDL3/SDL.h>
 #include <nxdk/mount.h>
 
+#include "stb_image_write.h"
+
 #define CERBIOS_INI_E "E:\\Cerbios\\Cerbios.ini"
 #define CERBIOS_INI_C "C:\\Cerbios\\Cerbios.ini" // Fallback for Cerbios versions before v3.0
 
+extern int render_get_framebuffer_rgba(uint8_t **out_pixels, int *out_w, int *out_h, int *out_pitch);
+
 static IGR_Action g_last_action = IGR_ACTION_NONE;
+static int g_screen_combo_held = 0;
+
+static void IGR_StbiWriteFunc(void *context, void *data, int size)
+{
+	FILE *fp = (FILE *)context;
+	if (fp && data && size > 0)
+	{
+		fwrite(data, 1, (size_t)size, fp);
+	}
+}
+
+static const char *IGR_GetFormatExtension(IGR_ImageFormat format)
+{
+	switch (format)
+	{
+		case IGR_FORMAT_JPG:
+			return "jpg";
+		case IGR_FORMAT_BMP:
+			return "bmp";
+		case IGR_FORMAT_PNG:
+		default:
+			return "png";
+	}
+}
 
 static uint32_t IGR_ParseComboHex(const char *val)
 {
@@ -55,6 +83,7 @@ static void IGR_ApplyMissingIniFallback(IGR_Config *cfg)
 {
 	memset(cfg, 0, sizeof(*cfg));
 	cfg->game_mask = IGR_ParseComboHex("67CD");
+	cfg->screen_mask = IGR_ParseComboHex("EF");
 }
 
 static void IGR_CleanString(char *str)
@@ -153,6 +182,25 @@ static void IGR_MountPartitions(void)
 	}
 }
 
+static int IGR_EnsureScreenshotDirReady(void)
+{
+	if (GetFileAttributesA("E:\\") == INVALID_FILE_ATTRIBUTES)
+	{
+		if (FAILED(nxMountDrive('E', "\\Device\\Harddisk0\\Partition1\\")))
+		{
+			return 0;
+		}
+	}
+
+	CreateDirectoryA(IGR_SCREENSHOT_DIR, NULL);
+	if (GetFileAttributesA(IGR_SCREENSHOT_DIR) == INVALID_FILE_ATTRIBUTES)
+	{
+		return 0;
+	}
+
+	return 1;
+}
+
 static uint32_t IGR_ReadGamepadMask(SDL_Gamepad *pad)
 {
 	if (!pad)
@@ -213,6 +261,41 @@ static IGR_Action IGR_MatchAction(const IGR_Config *cfg, uint32_t pressed_mask)
 	return IGR_ACTION_NONE;
 }
 
+static IGR_Action IGR_PollCombinedAction(const IGR_Config *cfg, int *out_screen_held)
+{
+	if (out_screen_held)
+		*out_screen_held = 0;
+
+	int count = 0;
+	SDL_JoystickID *ids = SDL_GetGamepads(&count);
+	if (!ids)
+		return IGR_ACTION_NONE;
+
+	IGR_Action matched = IGR_ACTION_NONE;
+
+	for (int i = 0; i < count; i++)
+	{
+		SDL_Gamepad *pad = SDL_OpenGamepad(ids[i]);
+		if (!pad)
+			continue;
+
+		uint32_t mask = IGR_ReadGamepadMask(pad);
+		SDL_CloseGamepad(pad);
+
+		if (cfg->screen_mask && mask == cfg->screen_mask && out_screen_held)
+			*out_screen_held = 1;
+
+		IGR_Action action = IGR_MatchAction(cfg, mask);
+		if (action != IGR_ACTION_NONE && matched == IGR_ACTION_NONE)
+		{
+			matched = action;
+		}
+	}
+
+	SDL_free(ids);
+	return matched;
+}
+
 void IGR_SDL3_Init(IGR_StateSDL3 *state)
 {
 	if (!state)
@@ -220,7 +303,12 @@ void IGR_SDL3_Init(IGR_StateSDL3 *state)
 
 	state->triggered = 0;
 	state->matched_action = IGR_ACTION_NONE;
+	state->screenshot_format = IGR_FORMAT_PNG;
+	state->jpg_quality = IGR_JPG_QUALITY;
+	state->screenshot_index = 1;
+	state->last_screenshot_path[0] = '\0';
 	g_last_action = IGR_ACTION_NONE;
+	g_screen_combo_held = 0;
 
 	IGR_SetDefaultConfig(&state->config);
 	IGR_MountPartitions();
@@ -233,6 +321,178 @@ void IGR_SDL3_Init(IGR_StateSDL3 *state)
 		IGR_ApplyMissingIniFallback(&state->config);
 }
 
+void IGR_SDL3_SetScreenshotFormat(IGR_StateSDL3 *state, IGR_ImageFormat format)
+{
+	if (!state)
+		return;
+
+	state->screenshot_format = format;
+}
+
+int IGR_SDL3_SaveImage(
+	IGR_StateSDL3 *state,
+	SDL_Renderer *renderer,
+	const char *outPath,
+	IGR_ImageFormat format)
+{
+	if (!outPath || !outPath[0])
+		return 0;
+
+	if (!IGR_EnsureScreenshotDirReady())
+		return 0;
+
+	SDL_Surface *rgba = NULL;
+
+	if (renderer)
+	{
+		SDL_Surface *raw = SDL_RenderReadPixels(renderer, NULL);
+		if (!raw)
+		{
+			return 0;
+		}
+
+		rgba = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32);
+		SDL_DestroySurface(raw);
+		if (!rgba)
+		{
+			return 0;
+		}
+	}
+	else
+	{
+		uint8_t *fb_pixels = NULL;
+		int w = 0, h = 0, pitch = 0;
+
+		if (!render_get_framebuffer_rgba(&fb_pixels, &w, &h, &pitch))
+		{
+			return 0;
+		}
+
+		SDL_Surface *raw = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_ARGB8888, fb_pixels, pitch);
+		if (!raw)
+		{
+			return 0;
+		}
+
+		rgba = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32);
+		SDL_DestroySurface(raw);
+		if (!rgba)
+		{
+			return 0;
+		}
+	}
+
+	for (int y = 0; y < rgba->h; ++y)
+	{
+		uint8_t *row = (uint8_t *)rgba->pixels + (size_t)y * rgba->pitch;
+		for (int x = 0; x < rgba->w; ++x)
+			row[x * 4 + 3] = 0xFF;
+	}
+
+	FILE *fp = fopen(outPath, "wb");
+	if (!fp)
+	{
+		SDL_DestroySurface(rgba);
+		return 0;
+	}
+
+	int ok = 0;
+
+	switch (format)
+	{
+		case IGR_FORMAT_BMP:
+			ok = stbi_write_bmp_to_func(
+				IGR_StbiWriteFunc,
+				fp,
+				rgba->w,
+				rgba->h,
+				4,
+				rgba->pixels);
+			break;
+
+		case IGR_FORMAT_JPG:
+		{
+			int quality = (state && state->jpg_quality > 0 && state->jpg_quality <= 100)
+				? state->jpg_quality
+				: IGR_JPG_QUALITY;
+			ok = stbi_write_jpg_to_func(
+				IGR_StbiWriteFunc,
+				fp,
+				rgba->w,
+				rgba->h,
+				4,
+				rgba->pixels,
+				quality);
+			break;
+		}
+
+		case IGR_FORMAT_PNG:
+		default:
+			stbi_write_png_compression_level = IGR_PNG_COMPRESSION_LEVEL;
+			ok = stbi_write_png_to_func(
+				IGR_StbiWriteFunc,
+				fp,
+				rgba->w,
+				rgba->h,
+				4,
+				rgba->pixels,
+				rgba->pitch);
+			break;
+	}
+
+	fclose(fp);
+	SDL_DestroySurface(rgba);
+
+	if (!ok)
+	{
+		return 0;
+	}
+
+	return 1;
+}
+
+int IGR_SDL3_SavePNG(IGR_StateSDL3 *state, SDL_Renderer *renderer, const char *outPath)
+{
+	return IGR_SDL3_SaveImage(state, renderer, outPath, IGR_FORMAT_PNG);
+}
+
+int IGR_SDL3_CaptureScreenshot(
+	IGR_StateSDL3 *state,
+	SDL_Renderer *renderer,
+	char *outPathBuf,
+	unsigned int outPathBufSize)
+{
+	unsigned int idx = (state && state->screenshot_index > 0) ? state->screenshot_index : 1;
+	IGR_ImageFormat fmt = state ? state->screenshot_format : IGR_FORMAT_PNG;
+	const char *ext = IGR_GetFormatExtension(fmt);
+	char filePath[260];
+
+	snprintf(
+		filePath,
+		sizeof(filePath),
+		"%s\\%s_%04u.%s",
+		IGR_SCREENSHOT_DIR,
+		IGR_SCREENSHOT_PREFIX,
+		idx,
+		ext);
+
+	if (!IGR_SDL3_SaveImage(state, renderer, filePath, fmt))
+		return 0;
+
+	if (state)
+	{
+		snprintf(state->last_screenshot_path, sizeof(state->last_screenshot_path), "%s", filePath);
+		state->screenshot_index = idx + 1;
+	}
+
+	if (outPathBuf && outPathBufSize > 0)
+	{
+		snprintf(outPathBuf, outPathBufSize, "%s", filePath);
+	}
+
+	return 1;
+}
+
 int IGR_SDL3_Update(IGR_StateSDL3 *state)
 {
 	if (!state)
@@ -241,31 +501,55 @@ int IGR_SDL3_Update(IGR_StateSDL3 *state)
 	if (state->triggered)
 		return 1;
 
-	int count = 0;
-	SDL_JoystickID *ids = SDL_GetGamepads(&count);
-	if (!ids)
-		return 0;
+	int screen_held_now = 0;
+	IGR_Action action = IGR_PollCombinedAction(&state->config, &screen_held_now);
+	g_screen_combo_held = screen_held_now;
 
-	for (int i = 0; i < count; i++)
+	if (action != IGR_ACTION_NONE && action != IGR_ACTION_SCREEN)
 	{
-		SDL_Gamepad *pad = SDL_OpenGamepad(ids[i]);
-		if (!pad)
-			continue;
-
-		uint32_t mask = IGR_ReadGamepadMask(pad);
-		SDL_CloseGamepad(pad);
-
-		IGR_Action action = IGR_MatchAction(&state->config, mask);
-		if (action != IGR_ACTION_NONE)
-		{
-			state->matched_action = action;
-			g_last_action = action;
-			state->triggered = 1;
-			break;
-		}
+		state->matched_action = action;
+		g_last_action = action;
+		state->triggered = 1;
 	}
 
-	SDL_free(ids);
+	return state->triggered;
+}
+
+int IGR_SDL3_UpdateWithScreenshot(
+	IGR_StateSDL3 *state,
+	SDL_Renderer *renderer,
+	char *outPathBuf,
+	unsigned int outPathBufSize)
+{
+	if (!state)
+		return 0;
+
+	if (state->triggered)
+		return 1;
+
+	int screen_held_now = 0;
+	IGR_Action action = IGR_PollCombinedAction(&state->config, &screen_held_now);
+	int screen_just_pressed = (screen_held_now && !g_screen_combo_held);
+	g_screen_combo_held = screen_held_now;
+
+	if (action == IGR_ACTION_SCREEN)
+	{
+		if (screen_just_pressed)
+		{
+			state->matched_action = IGR_ACTION_SCREEN;
+			g_last_action = IGR_ACTION_SCREEN;
+			return IGR_SDL3_CaptureScreenshot(state, renderer, outPathBuf, outPathBufSize);
+		}
+		return 0;
+	}
+
+	if (action != IGR_ACTION_NONE)
+	{
+		state->matched_action = action;
+		g_last_action = action;
+		state->triggered = 1;
+	}
+
 	return state->triggered;
 }
 
