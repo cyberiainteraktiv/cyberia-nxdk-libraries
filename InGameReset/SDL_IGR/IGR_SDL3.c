@@ -13,7 +13,7 @@
 #include <SDL3/SDL.h>
 #include <nxdk/mount.h>
 
-#include "stb_image_write.h"
+#include "libs/stb_image_write.h"
 
 #define CERBIOS_INI_E "E:\\Cerbios\\Cerbios.ini"
 #define CERBIOS_INI_C "C:\\Cerbios\\Cerbios.ini" // Fallback for Cerbios versions before v3.0
