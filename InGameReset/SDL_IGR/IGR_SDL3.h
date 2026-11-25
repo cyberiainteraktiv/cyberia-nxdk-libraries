@@ -2,10 +2,34 @@
 #define IGR_SDL3_H
 
 #include <stdint.h>
+#include <SDL3/SDL.h>
 
 #ifndef IGR_REBOOT_DELAY_MS
 #define IGR_REBOOT_DELAY_MS 250
 #endif
+
+#ifndef IGR_SCREENSHOT_DIR
+#define IGR_SCREENSHOT_DIR "E:\\Screenshots"
+#endif
+
+#ifndef IGR_SCREENSHOT_PREFIX
+#define IGR_SCREENSHOT_PREFIX "shot"
+#endif
+
+#ifndef IGR_PNG_COMPRESSION_LEVEL
+#define IGR_PNG_COMPRESSION_LEVEL 2
+#endif
+
+#ifndef IGR_JPG_QUALITY
+#define IGR_JPG_QUALITY 100
+#endif
+
+typedef enum IGR_ImageFormat
+{
+	IGR_FORMAT_PNG = 0,
+	IGR_FORMAT_JPG,
+	IGR_FORMAT_BMP
+} IGR_ImageFormat;
 
 typedef enum IGR_Button
 {
@@ -55,10 +79,34 @@ typedef struct IGR_StateSDL3
 	int triggered;
 	IGR_Action matched_action;
 	IGR_Config config;
+	IGR_ImageFormat screenshot_format;
+	int jpg_quality;
+	unsigned int screenshot_index;
+	char last_screenshot_path[260];
 } IGR_StateSDL3;
 
 void IGR_SDL3_Init(IGR_StateSDL3 *state);
+void IGR_SDL3_SetScreenshotFormat(IGR_StateSDL3 *state, IGR_ImageFormat format);
 int IGR_SDL3_Update(IGR_StateSDL3 *state);
+int IGR_SDL3_UpdateWithScreenshot(
+	IGR_StateSDL3 *state,
+	SDL_Renderer *renderer,
+	char *outPathBuf,
+	unsigned int outPathBufSize);
+int IGR_SDL3_SaveImage(
+	IGR_StateSDL3 *state,
+	SDL_Renderer *renderer,
+	const char *outPath,
+	IGR_ImageFormat format);
+int IGR_SDL3_SavePNG(
+	IGR_StateSDL3 *state,
+	SDL_Renderer *renderer,
+	const char *outPath);
+int IGR_SDL3_CaptureScreenshot(
+	IGR_StateSDL3 *state,
+	SDL_Renderer *renderer,
+	char *outPathBuf,
+	unsigned int outPathBufSize);
 void IGR_SDL3_Reboot(void);
 
 #endif
