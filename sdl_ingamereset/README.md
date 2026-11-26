@@ -1,5 +1,5 @@
 # SDL_InGameReset
-A template for adding simple, native-feeling in-game reset and screenshot functionality to your SDL2 or SDL3 based NXDK projects, using Cerbios bindings first and a fallback quick reset using ```LT+RT+Start+Back``` for non-Cerbios setups.
+A library for adding simple, native-feeling in-game reset and screenshot functionality to your SDL2 or SDL3 based NXDK projects, using Cerbios bindings first (scans E:/Cerbios/Cerbios.ini first, and if not found, looks for C:/Cerbios.ini) and a fallback quick reset using ```LT+RT+Start+Back``` for non-Cerbios setups.
 
 ## Usage
 - Put "IGR_SDLx.h", "IGR_SDLx.c" and "lib/stb_image_write.h" in your project folder and add "IGR_SDLx.c" to your "Makefile". (x being your SDL version number)
